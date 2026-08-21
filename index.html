@@ -49,16 +49,17 @@ const canvas = document.getElementById("clock");
 const ctx = canvas.getContext("2d");
 
 function layout() {
-  const size = Math.min(window.innerWidth, window.innerHeight - 140);
+  const size = Math.min(window.innerWidth, window.innerHeight - 120);
   CW = size; CH = size;
   canvas.style.width = size + "px";
   canvas.style.height = size + "px";
   canvas.width = Math.round(size * dpr);
   canvas.height = Math.round(size * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  R  = size * 0.44;
+  // 圆缩小并上移，底部留一条专门放数字时间的区域（时间在圆外）
+  R  = size * 0.34;
   CX = size / 2;
-  CY = size / 2;
+  CY = size * 0.46;
 }
 
 // ================= 逻辑 =================
@@ -110,7 +111,7 @@ function showTip(s){
   tipRaf = requestAnimationFrame(step);
 }
 function showTipIfSpecial(){
-  const m = dispMinute();
+  const m = dispMinuteFrac();
   const h = dispHourOf(absClock);
   if (m === 0) showTip(h + "点整！");
   else if (m === 30) showTip(h + "点半！");
@@ -120,12 +121,18 @@ function onDragEnded(){
 }
 
 // ================= 拖动手势 =================
+// 用 pointer 事件为主，同时挂 mouse/touch 兜底（兼容微信内置浏览器/老内核）
 let dragging = null;        // "minute" | "hour"
 
 function ptFromEvent(e){
   const rect = canvas.getBoundingClientRect();
-  const p = (e.touches && e.touches[0]) ? e.touches[0] : e;
-  return { x: p.clientX - rect.left, y: p.clientY - rect.top };
+  const cx = (e.touches && e.touches[0]) ? e.touches[0].clientX
+            : (e.clientX !== undefined) ? e.clientX
+            : e.pageX;
+  const cy = (e.touches && e.touches[0]) ? e.touches[0].clientY
+            : (e.clientY !== undefined) ? e.clientY
+            : e.pageY;
+  return { x: cx - rect.left, y: cy - rect.top };
 }
 function angleOf(pt){
   const dx = pt.x - CX, dy = CY - pt.y;
@@ -144,37 +151,60 @@ function angleDiff(a, b){
 }
 function pickHand(pt){
   const d = distToCenter(pt);
-  if (d < 14 || d > R + 10) return null;
+  if (d < 10 || d > R + 10) return null;
   const ang = angleOf(pt);
   const diffH = angleDiff(ang, hourAngle());
   const diffM = angleDiff(ang, minuteAngle());
-  if (d <= R * 0.56 && diffH < 22) return "hour";
-  if (diffM < 22) return "minute";
-  if (diffH < 22) return "hour";
+  if (d <= R * 0.58 && diffH < 26) return "hour";
+  if (diffM < 24) return "minute";
+  if (diffH < 24) return "hour";
   return null;
 }
 function updateDrag(pt){
   const ang = angleOf(pt);
   if (dragging === "minute") dragMinute(ang / 6);
   else if (dragging === "hour") dragHour(ang);
+  draw();
 }
-function endDrag(){
-  if (dragging) { showTipIfSpecial(); onDragEnded(); }
+function stopDrag(){
+  if (dragging) { try { showTipIfSpecial(); } catch(e){} onDragEnded(); }
   dragging = null;
 }
 
-canvas.addEventListener("pointerdown", e => {
-  canvas.setPointerCapture(e.pointerId);
+function onPointerDown(e){
   const pt = ptFromEvent(e);
   const h = pickHand(pt);
-  if (h) { dragging = h; updateDrag(pt); }
-});
-canvas.addEventListener("pointermove", e => {
+  if (h) {
+    dragging = h;
+    try { canvas.setPointerCapture(e.pointerId); } catch(err) {}
+    updateDrag(pt);
+    if (e.preventDefault) e.preventDefault();
+  }
+}
+function onPointerMove(e){
   if (!dragging) return;
   updateDrag(ptFromEvent(e));
-});
-canvas.addEventListener("pointerup", endDrag);
-canvas.addEventListener("pointercancel", endDrag);
+  if (e.preventDefault) e.preventDefault();
+}
+function onPointerUp(){
+  stopDrag();
+}
+
+// 正式绑定：pointer 为主（move/up 绑到 window，确保拖出 canvas 也不丢失）
+canvas.addEventListener("pointerdown", onPointerDown, false);
+window.addEventListener("pointermove", onPointerMove, false);
+window.addEventListener("pointerup", onPointerUp, false);
+window.addEventListener("pointercancel", onPointerUp, false);
+
+// 兜底：老浏览器 / 无 PointerEvent 的环境
+if (window.PointerEvent === undefined) {
+  canvas.addEventListener("mousedown", onPointerDown, false);
+  window.addEventListener("mousemove", onPointerMove, false);
+  window.addEventListener("mouseup", onPointerUp, false);
+  canvas.addEventListener("touchstart", onPointerDown, false);
+  window.addEventListener("touchmove", onPointerMove, false);
+  window.addEventListener("touchend", onPointerUp, false);
+}
 
 // ================= 绘制 =================
 function polar(r, deg){
@@ -266,7 +296,7 @@ function draw(){
     ctx.stroke();
   }
 
-  // 数字时间（大字，24 制）
+  // 数字时间（大字，24 制）——画在时钟圆之外的底部保留区域
   const hh = dispHourOf(absClock);
   const mm = dispMinuteFrac();
   const tf = "bold " + Math.max(24, CW * 0.085) + "px sans-serif";
@@ -274,12 +304,12 @@ function draw(){
   ctx.fillStyle = "#ffffff";
   ctx.textBaseline = "middle";
   const timeText = pad2(hh) + ":" + pad2(mm);
-  ctx.fillText(timeText, CX, CH * 0.9 - 8);
+  ctx.fillText(timeText, CX, CH * 0.90);
   if (tipT < 1 && tipText) {
     const k = Math.sin(Math.min(1, tipT) * Math.PI);
     ctx.font = "bold " + (20 + 6 * k) + "px sans-serif";
     ctx.fillStyle = "rgba(255,214,130," + Math.min(1, k) + ")";
-    ctx.fillText(tipText, CX, CH * 0.9 + 26);
+    ctx.fillText(tipText, CX, CH * 0.90 + 26);
   }
 }
 function pad2(n){ return (n < 10 ? "0" : "") + n; }
