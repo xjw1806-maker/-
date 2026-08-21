@@ -32,9 +32,8 @@
 <script>
 // ================= 时钟状态 =================
 // absClock：累计小时（24 小时制，可无限累加，不取模）。0=午夜，12=正午，24=次日午夜。
-let absClock = 6.0;        // 初始 06:00
-let cumMin = absClock * 60;
-let minute = 0;
+// 分针角度与分钟数字全部由 absClock 派生，保证不错位。
+let absClock = 6.0;        // 初始 06:00（6 点整，分针指 12）
 
 // 提示动画
 let tipText = "";
@@ -73,29 +72,31 @@ function dispMinuteFrac(){
 }
 
 function hourAngle(){ return (absClock % 12) * 30; }
-function minuteAngle(){ return minute * 6; }
+
+// 分针角度：全部由 absClock 的小数部分派生，保证与数字分钟完全同步、不错位
+function minuteAngle(){
+  const f = (((absClock % 1) + 1) % 1);
+  return f * 60 * 6;
+}
 
 // 分针角度 -> 小时读数（0-12）
 function angleTo12(deg){ return deg / 30; }
 
-// 拖分针：累计
+// 拖分针：以 absClock 为唯一来源累计（鼠标角度 -> 分针读数 -> 对 absClock 做半圈环绕增量）
 function dragMinute(newMinRaw){
-  const delta = newMinRaw - minute;
-  let d = delta;
+  const curMinOfAbs = (((absClock % 1) + 1) % 1) * 60;  // 当前 absClock 的分针读数 0-60
+  let d = newMinRaw - curMinOfAbs;
   while (d > 30) d -= 60;
   while (d < -30) d += 60;
-  cumMin += d;
-  absClock = cumMin / 60;
-  minute = ((newMinRaw % 60) + 60) % 60;
+  absClock += d / 60;
 }
 
-// 拖时针：锁在同一半天（0-12 或 12-24）内移动
+// 拖时针：锁在同一半天（0-12 或 12-24）内移动，整数小时、分针归零
 function dragHour(angleDeg){
   const target = angleTo12(angleDeg);
   const dom = Math.floor(absClock / 12) * 12;
   absClock = dom + target;
   if (absClock < 0) absClock += 12;
-  minute = 0;
 }
 
 function showTip(s){
@@ -115,9 +116,6 @@ function showTipIfSpecial(){
   const h = dispHourOf(absClock);
   if (m === 0) showTip(h + "点整！");
   else if (m === 30) showTip(h + "点半！");
-}
-function onDragEnded(){
-  cumMin = absClock * 60;
 }
 
 // ================= 拖动手势 =================
@@ -167,7 +165,7 @@ function updateDrag(pt){
   draw();
 }
 function stopDrag(){
-  if (dragging) { try { showTipIfSpecial(); } catch(e){} onDragEnded(); }
+  if (dragging) { try { showTipIfSpecial(); } catch(e){} }
   dragging = null;
 }
 
@@ -225,8 +223,8 @@ function draw(){
   ctx.fillStyle = radGrad;
   ctx.fill();
 
-  // 分针扇形高亮
-  const mAng = minute * 6;
+  // 分针扇形高亮（与分针角度同源）
+  const mAng = minuteAngle();
   const faceW = r * 2, faceH = r * 2;
   if (mAng > 0.4) {
     ctx.beginPath();
