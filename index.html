@@ -204,21 +204,23 @@ function onPointerUp(){
   stopDrag();
 }
 
-// 正式绑定：pointer 为主（move/up 绑到 window，确保拖出 canvas 也不丢失）
+// pointer 为主动画；同时挂 mouse/touch 兜底（兼容手机微信等 PointerEvent 支持不完整的环境）
+// 各 handler 幂等：同一物理操作若同时触发 pointer+mouse+touch，stopDrag 重复调用无害。
 canvas.addEventListener("pointerdown", onPointerDown, false);
 window.addEventListener("pointermove", onPointerMove, false);
 window.addEventListener("pointerup", onPointerUp, false);
 window.addEventListener("pointercancel", onPointerUp, false);
 
-// 兜底：老浏览器 / 无 PointerEvent 的环境
-if (window.PointerEvent === undefined) {
-  canvas.addEventListener("mousedown", onPointerDown, false);
-  window.addEventListener("mousemove", onPointerMove, false);
-  window.addEventListener("mouseup", onPointerUp, false);
-  canvas.addEventListener("touchstart", onPointerDown, false);
-  window.addEventListener("touchmove", onPointerMove, false);
-  window.addEventListener("touchend", onPointerUp, false);
-}
+// 触摸：touchstart 在 canvas 上，move/end/cancel 挂到 document 以保证手指离开屏幕也一定触发吸附
+canvas.addEventListener("touchstart", onPointerDown, { passive: false });
+document.addEventListener("touchmove", onPointerMove, { passive: false });
+document.addEventListener("touchend", onPointerUp, false);
+document.addEventListener("touchcancel", onPointerUp, false);
+
+// 鼠标兜底（pointer 未生效的极端环境）
+canvas.addEventListener("mousedown", onPointerDown, false);
+window.addEventListener("mousemove", onPointerMove, false);
+window.addEventListener("mouseup", onPointerUp, false);
 
 // ================= 绘制 =================
 function polar(r, deg){
@@ -338,14 +340,4 @@ function drawHand(deg, len, tail, width, color){
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.stroke();
-}
-
-// ================= 就绪 =================
-window.addEventListener("resize", () => { layout(); draw(); });
-layout();
-draw();
-</script>
-</body>
-</html>
+  ctx.lineJoin
