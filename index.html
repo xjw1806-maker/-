@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>教学时钟 · 24小时制</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    background: #0f1522;
+    color: #eef3fa;
+    display: flex; flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #stage { position: relative; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .hint {
+    margin-top: 10px; font-size: 14px; color: #8f9fb8;
+    text-align: center; padding: 0 16px; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+  <div id="stage"><canvas id="clock"></canvas></div>
+  <div class="hint">拖动 分针(蓝) 或 时针(橙) ── 分针走一圈，时针走一格<br>拖分针带动时针，拖时针回到整点（24小时制）</div>
+
+<script>
+// ================= 时钟状态 =================
+// absClock：累计小时（24 小时制，可无限累加，不取模）。0=午夜，12=正午，24=次日午夜。
+let absClock = 6.0;        // 初始 06:00
+let cumMin = absClock * 60;
+let minute = 0;
+
+// 提示动画
+let tipText = "";
+let tipT = 1;              // >=1 无动画
+let tipRaf = null;
+
+// ================= 几何/绘制参数 =================
+let CW = 0, CH = 0, R = 0, CX = 0, CY = 0;
+const dpr = window.devicePixelRatio || 1;
+
+const canvas = document.getElementById("clock");
+const ctx = canvas.getContext("2d");
+
+function layout() {
+  const size = Math.min(window.innerWidth, window.innerHeight - 140);
+  CW = size; CH = size;
+  canvas.style.width = size + "px";
+  canvas.style.height = size + "px";
+  canvas.width = Math.round(size * dpr);
+  canvas.height = Math.round(size * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  R  = size * 0.44;
+  CX = size / 2;
+  CY = size / 2;
+}
+
+// ================= 逻辑 =================
+function norm2400(h){ return ((h % 24) + 24) % 24; }
+
+function dispHourOf(c){ return norm2400(Math.floor(c)); }
+
+function dispMinuteFrac(){
+  const f = absClock - Math.floor(absClock);
+  return Math.round(f * 60) % 60;
+}
+
+function hourAngle(){ return (absClock % 12) * 30; }
+function minuteAngle(){ return minute * 6; }
+
+// 分针角度 -> 小时读数（0-12）
+function angleTo12(deg){ return deg / 30; }
+
+// 拖分针：累计
+function dragMinute(newMinRaw){
+  const delta = newMinRaw - minute;
+  let d = delta;
+  while (d > 30) d -= 60;
+  while (d < -30) d += 60;
+  cumMin += d;
+  absClock = cumMin / 60;
+  minute = ((newMinRaw % 60) + 60) % 60;
+}
+
+// 拖时针：锁在同一半天（0-12 或 12-24）内移动
+function dragHour(angleDeg){
+  const target = angleTo12(angleDeg);
+  const dom = Math.floor(absClock / 12) * 12;
+  absClock = dom + target;
+  if (absClock < 0) absClock += 12;
+  minute = 0;
+}
+
+function showTip(s){
+  tipText = s;
+  tipT = 0;
+  if (tipRaf) cancelAnimationFrame(tipRaf);
+  const step = () => {
+    tipT += 0.035;
+    if (tipT >= 1) { tipT = 1; tipRaf = null; }
+    draw();
+    if (tipT < 1) tipRaf = requestAnimationFrame(step);
+  };
+  tipRaf = requestAnimationFrame(step);
+}
+function showTipIfSpecial(){
+  const m = dispMinute();
+  const h = dispHourOf(absClock);
+  if (m === 0) showTip(h + "点整！");
+  else if (m === 30) showTip(h + "点半！");
+}
+function onDragEnded(){
+  cumMin = absClock * 60;
+}
+
+// ================= 拖动手势 =================
+let dragging = null;        // "minute" | "hour"
+
+function ptFromEvent(e){
+  const rect = canvas.getBoundingClientRect();
+  const p = (e.touches && e.touches[0]) ? e.touches[0] : e;
+  return { x: p.clientX - rect.left, y: p.clientY - rect.top };
+}
+function angleOf(pt){
+  const dx = pt.x - CX, dy = CY - pt.y;
+  let a = Math.atan2(dx, dy) * 180 / Math.PI;
+  a = (a + 360) % 360;
+  return a;
+}
+function distToCenter(pt){
+  const dx = pt.x - CX, dy = CY - pt.y;
+  return Math.hypot(dx, dy);
+}
+// 角度差（0-180）
+function angleDiff(a, b){
+  let d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+function pickHand(pt){
+  const d = distToCenter(pt);
+  if (d < 14 || d > R + 10) return null;
+  const ang = angleOf(pt);
+  const diffH = angleDiff(ang, hourAngle());
+  const diffM = angleDiff(ang, minuteAngle());
+  if (d <= R * 0.56 && diffH < 22) return "hour";
+  if (diffM < 22) return "minute";
+  if (diffH < 22) return "hour";
+  return null;
+}
+function updateDrag(pt){
+  const ang = angleOf(pt);
+  if (dragging === "minute") dragMinute(ang / 6);
+  else if (dragging === "hour") dragHour(ang);
+}
+function endDrag(){
+  if (dragging) { showTipIfSpecial(); onDragEnded(); }
+  dragging = null;
+}
+
+canvas.addEventListener("pointerdown", e => {
+  canvas.setPointerCapture(e.pointerId);
+  const pt = ptFromEvent(e);
+  const h = pickHand(pt);
+  if (h) { dragging = h; updateDrag(pt); }
+});
+canvas.addEventListener("pointermove", e => {
+  if (!dragging) return;
+  updateDrag(ptFromEvent(e));
+});
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+// ================= 绘制 =================
+function polar(r, deg){
+  const rad = deg * Math.PI / 180;
+  return { x: CX + Math.sin(rad) * r, y: CY - Math.cos(rad) * r };
+}
+
+function draw(){
+  ctx.clearRect(0, 0, CW, CH);
+
+  // 钟面底色
+  const r = R;
+  const radGrad = ctx.createLinearGradient(0, CY - r, 0, CY + r);
+  radGrad.addColorStop(0, "#2d3d58");
+  radGrad.addColorStop(1, "#202b40");
+  ctx.beginPath();
+  ctx.arc(CX, CY, r, 0, Math.PI * 2);
+  ctx.fillStyle = radGrad;
+  ctx.fill();
+
+  // 分针扇形高亮
+  const mAng = minute * 6;
+  const faceW = r * 2, faceH = r * 2;
+  if (mAng > 0.4) {
+    ctx.beginPath();
+    ctx.moveTo(CX, CY);
+    ctx.arc(CX, CY, r, (-90) * Math.PI / 180, (-90 + mAng) * Math.PI / 180);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(96,180,255,0.16)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(120,190,255,0.5)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  // 刻度
+  for (let i = 0; i < 60; i++) {
+    const major = i % 5 === 0;
+    const r1 = r - (major ? 17 : 9);
+    const p1 = polar(r1, i * 6);
+    const p2 = polar(r - 3, i * 6);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.strokeStyle = major ? "#e6eef7" : "#52647e";
+    ctx.lineWidth = major ? 3 : 1.4;
+    ctx.stroke();
+  }
+
+  // 外圈分钟数字 5..60
+  ctx.fillStyle = "#8fa4bf";
+  ctx.font = Math.max(11, CW * 0.022) + "px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let i = 1; i <= 12; i++) {
+    const p = polar(r - 13, i * 30);
+    ctx.fillText(String(i * 5), p.x, p.y);
+  }
+
+  // 内圈数字 1-12
+  ctx.fillStyle = "#f2f6fb";
+  ctx.font = "bold " + Math.max(15, CW * 0.05) + "px sans-serif";
+  for (let i = 1; i <= 12; i++) {
+    const p = polar(r - 42, i * 30);
+    ctx.fillText(String(i), p.x, p.y);
+  }
+
+  // 指针
+  drawHand(hourAngle(), r * 0.48, r * 0.14, 13, "#ffb35c");
+  drawHand(minuteAngle(), r * 0.72, r * 0.10, 7.5, "#4da6ff");
+
+  // 中心帽
+  ctx.beginPath();
+  ctx.arc(CX, CY, 11, 0, Math.PI * 2);
+  ctx.fillStyle = "#1c2533";
+  ctx.fill();
+  ctx.strokeStyle = "#8fa4bf";
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // 整点/半点辉光
+  if (tipT < 1) {
+    const k = Math.sin(Math.min(1, tipT) * Math.PI);
+    const grow = 8 + 16 * k;
+    ctx.beginPath();
+    ctx.arc(CX, CY, r + grow, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,205,120," + Math.min(1, 0.7 * k) + ")";
+    ctx.lineWidth = 2 + 5 * k;
+    ctx.stroke();
+  }
+
+  // 数字时间（大字，24 制）
+  const hh = dispHourOf(absClock);
+  const mm = dispMinuteFrac();
+  const tf = "bold " + Math.max(24, CW * 0.085) + "px sans-serif";
+  ctx.font = tf;
+  ctx.fillStyle = "#ffffff";
+  ctx.textBaseline = "middle";
+  const timeText = pad2(hh) + ":" + pad2(mm);
+  ctx.fillText(timeText, CX, CH * 0.9 - 8);
+  if (tipT < 1 && tipText) {
+    const k = Math.sin(Math.min(1, tipT) * Math.PI);
+    ctx.font = "bold " + (20 + 6 * k) + "px sans-serif";
+    ctx.fillStyle = "rgba(255,214,130," + Math.min(1, k) + ")";
+    ctx.fillText(tipText, CX, CH * 0.9 + 26);
+  }
+}
+function pad2(n){ return (n < 10 ? "0" : "") + n; }
+
+function drawHand(deg, len, tail, width, color){
+  const rad = deg * Math.PI / 180;
+  const tip = { x: CX + Math.sin(rad) * len, y: CY - Math.cos(rad) * len };
+  const tlp = { x: CX - Math.sin(rad) * tail, y: CY + Math.cos(rad) * tail };
+  ctx.beginPath();
+  ctx.moveTo(tlp.x, tlp.y);
+  ctx.lineTo(tip.x, tip.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+// ================= 就绪 =================
+window.addEventListener("resize", () => { layout(); draw(); });
+layout();
+draw();
+</script>
+</body>
+</html>
