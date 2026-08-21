@@ -99,6 +99,18 @@ function dragHour(angleDeg){
   if (absClock < 0) absClock += 12;
 }
 
+// 松手后分针吸附到最近的整分钟（每分钟权重一致，不做整点/整刻优先）
+function snapMinute(){
+  const m = dispMinuteFrac();          // 当前分钟 0-59
+  const dm = Math.floor(absClock);     // 当前小时（24h 制累计值）
+  const target = Math.round(m);        // 最近整分钟
+  if (target >= 60) {
+    absClock = dm + 1;                 // 吸到下一整点（小时进位）
+  } else {
+    absClock = dm + target / 60;
+  }
+}
+
 function showTip(s){
   tipText = s;
   tipT = 0;
@@ -165,7 +177,11 @@ function updateDrag(pt){
   draw();
 }
 function stopDrag(){
-  if (dragging) { try { showTipIfSpecial(); } catch(e){} }
+  if (dragging) {
+    if (dragging === "minute") snapMinute();
+    draw();
+    try { showTipIfSpecial(); } catch(e){}
+  }
   dragging = null;
 }
 
