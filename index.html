@@ -340,4 +340,14 @@ function drawHand(deg, len, tail, width, color){
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.lineCap = "round";
-  ctx.lineJoin
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+// ================= 就绪 =================
+window.addEventListener("resize", () => { layout(); draw(); });
+layout();
+draw();
+</script>
+</body>
+</html>
