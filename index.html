@@ -91,11 +91,11 @@ function dragMinute(newMinRaw){
   absClock += d / 60;
 }
 
-// 拖时针：锁在同一半天（0-12 或 12-24）内移动，整数小时、分针归零
+// 拖时针：按鼠标角度做跨半天的连续环绕，24 小时制可连续推进到 13-24 点
 function dragHour(angleDeg){
-  const target = angleTo12(angleDeg);
-  const dom = Math.floor(absClock / 12) * 12;
-  absClock = dom + target;
+  const target = angleTo12(angleDeg);        // 0-12 钟面小时
+  const base = Math.round((absClock - target) / 12) * 12;  // 展开到最近的整 12 倍数
+  absClock = base + target;
   if (absClock < 0) absClock += 12;
 }
 
