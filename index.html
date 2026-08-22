@@ -23,17 +23,37 @@
     margin-top: 10px; font-size: 14px; color: #8f9fb8;
     text-align: center; padding: 0 16px; line-height: 1.6;
   }
+  .toggle {
+    margin-top: 10px;
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px 22px;
+    border: none;
+    border-radius: 22px;
+    cursor: pointer;
+    background: #3b5070;
+    color: #eef3fa;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    touch-action: manipulation;
+  }
+  .toggle.on { background: #f0a12a; color: #1c2533; }
 </style>
 </head>
 <body>
   <div id="stage"><canvas id="clock"></canvas></div>
-  <div class="hint">拖动 分针(蓝) 或 时针(橙) ── 分针走一圈，时针走一格<br>拖分针带动时针，拖时针回到整点（24小时制）</div>
+  <button id="toggleD" class="toggle" type="button">揭晓答案</button>
+  <div class="hint">拖动 分针(蓝) 或 时针(橙) ── 分针走一圈，时针走一格</div>
 
 <script>
 // ================= 时钟状态 =================
 // absClock：累计小时（24 小时制，可无限累加，不取模）。0=午夜，12=正午，24=次日午夜。
 // 分针角度与分钟数字全部由 absClock 派生，保证不错位。
 let absClock = 6.0;        // 初始 06:00（6 点整，分针指 12）
+
+// 数字钟显隐：默认隐藏，让小孩先盲拨指针，再点按钮揭晓答案
+let showDigital = false;
 
 // 提示动画
 let tipText = "";
@@ -64,7 +84,12 @@ function layout() {
 // ================= 逻辑 =================
 function norm2400(h){ return ((h % 24) + 24) % 24; }
 
-function dispHourOf(c){ return norm2400(Math.floor(c)); }
+// 显示小时（0-11 制）：11 点之后是 0 点（不出现 12）。正午/午夜都是 0。
+function dispHourOf(c){
+  return norm2400(Math.floor(c)) % 12;
+}
+// 是否下午（12:00~23:59 为下午）
+function isPM(c){ return norm2400(Math.floor(c)) >= 12; }
 
 function dispMinuteFrac(){
   const f = absClock - Math.floor(absClock);
@@ -126,8 +151,9 @@ function showTip(s){
 function showTipIfSpecial(){
   const m = dispMinuteFrac();
   const h = dispHourOf(absClock);
-  if (m === 0) showTip(h + "点整！");
-  else if (m === 30) showTip(h + "点半！");
+  const ap = isPM(absClock) ? "下午" : "上午";
+  if (m === 0) showTip(h + "点整" + ap + "！");
+  else if (m === 30) showTip(h + "点半" + ap + "！");
 }
 
 // ================= 拖动手势 =================
@@ -301,8 +327,8 @@ function draw(){
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
-  // 整点/半点辉光
-  if (tipT < 1) {
+  // 整点/半点辉光（仅显示数字钟时，避免提前提示“整点/半点”而泄题）
+  if (showDigital && tipT < 1) {
     const k = Math.sin(Math.min(1, tipT) * Math.PI);
     const grow = 8 + 16 * k;
     ctx.beginPath();
@@ -313,19 +339,28 @@ function draw(){
   }
 
   // 数字时间（大字，24 制）——画在时钟圆之外的底部保留区域
-  const hh = dispHourOf(absClock);
-  const mm = dispMinuteFrac();
-  const tf = "bold " + Math.max(24, CW * 0.085) + "px sans-serif";
-  ctx.font = tf;
-  ctx.fillStyle = "#ffffff";
-  ctx.textBaseline = "middle";
-  const timeText = pad2(hh) + ":" + pad2(mm);
-  ctx.fillText(timeText, CX, CH * 0.90);
-  if (tipT < 1 && tipText) {
-    const k = Math.sin(Math.min(1, tipT) * Math.PI);
-    ctx.font = "bold " + (20 + 6 * k) + "px sans-serif";
-    ctx.fillStyle = "rgba(255,214,130," + Math.min(1, k) + ")";
-    ctx.fillText(tipText, CX, CH * 0.90 + 26);
+  // 数字时间（大字）——画在时钟圆之外；仅当按下"揭晓答案"才显示（不含 tip 提示，防泄露）
+  if (showDigital) {
+    const hh12 = dispHourOf(absClock);
+    const mm = dispMinuteFrac();
+    const ap = isPM(absClock) ? "下午" : "上午";
+    const tf = "bold " + Math.max(24, CW * 0.085) + "px sans-serif";
+    ctx.font = tf;
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    const timeText = pad2(hh12) + ":" + pad2(mm);
+    ctx.fillText(timeText, CX, CH * 0.86);
+    ctx.font = "bold " + Math.max(13, CW * 0.04) + "px sans-serif";
+    ctx.fillStyle = "#a8b8cf";
+    ctx.fillText(ap, CX, CH * 0.96);
+    if (tipT < 1 && tipText) {
+      const k = Math.sin(Math.min(1, tipT) * Math.PI);
+      ctx.font = "bold " + (20 + 6 * k) + "px sans-serif";
+      ctx.fillStyle = "rgba(255,214,130," + Math.min(1, k) + ")";
+      ctx.fillText(tipText, CX, CH * 0.90 + 26);
+    }
+    ctx.textAlign = "start";  // 恢复默认，避免影响钟面数字对齐
   }
 }
 function pad2(n){ return (n < 10 ? "0" : "") + n; }
@@ -346,6 +381,16 @@ function drawHand(deg, len, tail, width, color){
 
 // ================= 就绪 =================
 window.addEventListener("resize", () => { layout(); draw(); });
+
+// 数字钟开关：点击在 显示/隐藏 间切换（默认隐藏，供小孩盲拨后再揭晓）
+const btnToggle = document.getElementById("toggleD");
+btnToggle.addEventListener("click", () => {
+  showDigital = !showDigital;
+  btnToggle.textContent = showDigital ? "隐藏数字" : "揭晓答案";
+  btnToggle.classList.toggle("on", showDigital);
+  draw();
+});
+
 layout();
 draw();
 </script>
